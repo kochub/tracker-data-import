@@ -4,27 +4,27 @@ import io
 from requests_oauthlib import OAuth1
 
 TRACKER_API_URL_SEARCH_TASKS = 'https://api.tracker.yandex.net/v2/issues/_search'
-HEADERS = {'X-Org-ID' : '37789', 'Authorization' : 'OAuth AQAEA7qkELYcAAeIVgu9pWPIxUVMnQFMVQv5lP0'}
-TRACKER_QUERY_TEXT = 'updated: >now()-16h'
+TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
+TRACKER_QUERY_TEXT = os.environ['TRACKER_QUERY_TEXT']
 
-YC_ACCESS_KEY_ID = 'YCAJEnE49YNOWeDT1je5FxuoW'
-YC_SECRET_ACCESS_KEY = 'YCOw85vlK7UkYpaGcM8_rI9woGw626VcXgrLmTpc'
-YC_ENDPOINT_URL='https://storage.yandexcloud.net'
-S3_BUCKET_NAME = 'tracker-import'
-S3_FILENAME = 'file_name.txt'
+YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
+YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
+YC_S3_ENDPOINT_URL = os.environ['YC_S3_ENDPOINT_URL']
+YC_S3_BUCKET_NAME = os.environ['YC_S3_BUCKET_NAME']
+YC_S3_FILENAME = os.environ['YC_S3_FILENAME']
 
 #Query to filter Tracker issues
 query={'query': TRACKER_QUERY_TEXT}
 
 #Make Tracker API call
-response = requests.post(TRACKER_API_URL_SEARCH_TASKS, headers=HEADERS, json=query)
+response = requests.post(TRACKER_API_URL_SEARCH_TASKS, headers=TRACKER_HEADERS, json=query)
 
 #Upload data to S3 bucket
 #Creating Session With Boto3.
 s3_client = boto3.client('s3',
-    aws_access_key_id=YC_ACCESS_KEY_ID,
-    aws_secret_access_key=YC_SECRET_ACCESS_KEY,
-    endpoint_url=YC_ENDPOINT_URL)
+    aws_access_key_id=YC_S3_ACCESS_KEY_ID,
+    aws_secret_access_key=YC_S3_SECRET_ACCESS_KEY,
+    endpoint_url=YC_S3_ENDPOINT_URL)
 #Upload HTTPResponse data to S3. Should be BytesIO
-s3_client.upload_fileobj(io.BytesIO(response.content), S3_BUCKET_NAME, S3_FILENAME)
+s3_client.upload_fileobj(io.BytesIO(response.content), YC_S3_BUCKET_NAME, YC_S3_FILENAME)
 
