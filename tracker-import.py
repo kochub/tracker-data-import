@@ -1,4 +1,5 @@
 from cgitb import text
+from typing import List
 from wsgiref import headers
 import requests
 import boto3
@@ -90,11 +91,64 @@ def shape_data(json_data):
     Returns:
         Pandas dataframe object with records
     """
-    df = pd.json_normalize(json_data, max_level=0)
-    df.insert(0, 'organization_id', os.environ['TRACKER_ORG_ID'])
-    return df
+    raw_df = pd.json_normalize(json_data, max_level=0)
+    raw_df.insert(0, 'organization_id', os.environ['TRACKER_ORG_ID'])
+    
+    #filter out unnecessary colums
+    shaped_df = pd.DataFrame(columns=columns)
+    for col in columns:
+        try:
+            shaped_df[col] = raw_df[col]
+        except KeyError as cerr:
+            shaped_df[col] = ""    
+    #reformat dateTime columns
+    #List of columns with dateTime data format
+    date_time_columns: List[str] = [
+        'statusStartTime',
+        'createdAt',
+        'updatedAt',
+        'lastCommentUpdatedAt',
+        'start',
+        'end',
+        'resolvedAt',
+        'dataObnovlenia'
+    ]
+    #Round dateTime columns up to seconds
+    for col in date_time_columns:
+        shaped_df[col] = pd.to_datetime(shaped_df["statusStartTime"]).dt.tz_localize(None).round('S')
+
+    #reformat decimal columns
+    #List of columns with decimal data format
+    decimal_columns: List[str] = [
+        'Effort',
+        'Confidence',
+        'commentWithExternalMessageCount',
+        'storyPoints',
+        'Impact',
+        'Reach',
+        'Score',
+        'commentWithoutExternalMessageCount',
+        'votes',
+        'checklistDone',
+        'checklistTotal',
+        'stoimost',
+        'zatratyrub'
+    ]
+    #Round dateTime columns up to 2 digits after comma
+    for col in decimal_columns:
+        shaped_df[col] = pd.to_numeric(shaped_df[col]).round(10)
+
+    return shaped_df
 
 def init_database(drop_table=False):
+    """
+    Initialise Clickhouse DB: Dropping & CReating table with columns
+    
+    Arguments:
+        drop_table (Boleean): flag to indcate tha Dropping table is needed
+    Returns:
+        Nothing
+    """
     if (drop_table):
         query = '''drop table if exists ''' + TABLE + ''' on cluster '{cluster}';'''
         run_clickhouse_query(query)
@@ -102,84 +156,84 @@ def init_database(drop_table=False):
     query = '''
         CREATE TABLE IF NOT EXISTS ''' + TABLE + ''' on cluster '{cluster}'
         (
-            organization_id String,
-            self         String,
-            id String,
-            key String,
-            version String,
-            pendingReplyFrom String,
-            statusStartTime String,
-            Effort String,
-            boards String,
-            type String,
-            previousStatusLastAssignee String,
-            createdAt String,
-            Confidence String,
-            commentWithExternalMessageCount String,
-            deadline String,
-            updatedAt String,
-            lastCommentUpdatedAt String,
-            storyPoints String,
-            summary String,
-            Impact String,
-            Reach String,
-            originalEstimation String,
-            updatedBy String,
-            spent String,
-            start String,
-            priority String,
-            estimation String,
-            Score String,
-            followers String,
-            createdBy String,
-            commentWithoutExternalMessageCount String,
-            votes String,
-            assignee String,
-            queue String,
-            status String,
-            previousStatus String,
-            favorite String,
-            tags String,
-            components String,
-            end String,
-            parent String,
-            resolvedAt String,
-            resolvedBy String,
-            resolution String,
-            epic String,
-            sprint String,
-            project String,
-            sla String,
-            otvetstvennyj String,
-            gorod String,
-            otvetstvennyjZaKomandirovki String,
-            podrazdelenie String,
-            description String,
-            cel String,
-            kadrovik String,
-            sotrudnik String,
-            buhgalter String,
-            unique String,
-            checklistDone String,
-            checklistTotal String,
-            checklistItems String,
-            stoimost String,
-            zatratyrub String,
-            programma String,
-            votedBy String,
-            aliases String,
-            previousQueue String,
-            emailCreatedBy String,
-            emailTo String,
-            emailFrom String,
-            dopolnitelnoeSoglasovanie String,
-            soglasuusij String,
-            cenaBileta String,
-            rekruter String,
-            uhodasijSotrudnik String,
-            professia String,
-            dataObnovlenia String,
-            otsutstvie String
+            organization_id                     String,
+            self                                String,
+            id                                  String,
+            key                                 String,
+            version                             String,
+            pendingReplyFrom                    String,
+            statusStartTime                     DateTime('Europe/Moscow'),
+            Effort                              decimal(15,2),
+            boards                              String,
+            type                                String,
+            previousStatusLastAssignee          String,
+            createdAt                           DateTime('Europe/Moscow'),
+            Confidence                          decimal(15,2),
+            commentWithExternalMessageCount     decimal(15,2),
+            deadline                            String,
+            updatedAt                           DateTime('Europe/Moscow'),
+            lastCommentUpdatedAt                DateTime('Europe/Moscow'),
+            storyPoints                         decimal(15,2),
+            summary                             String,
+            Impact                              decimal(15,2),
+            Reach                               decimal(15,2),
+            originalEstimation                  String,
+            updatedBy                           String,
+            spent                               String,
+            start                               DateTime('Europe/Moscow'),
+            priority                            String,
+            estimation                          String,
+            Score                               decimal(15,2),
+            followers                           String,
+            createdBy                           String,
+            commentWithoutExternalMessageCount  decimal(15,2),
+            votes                               decimal(15,2),
+            assignee                            String,
+            queue                               String,
+            status                              String,
+            previousStatus                      String,
+            favorite                            String,
+            tags                                String,
+            components                          String,
+            end                                 DateTime('Europe/Moscow'),
+            parent                              String,
+            resolvedAt                          DateTime('Europe/Moscow'),
+            resolvedBy                          String,
+            resolution                          String,
+            epic                                String,
+            sprint                              String,
+            project                             String,
+            sla                                 String,
+            otvetstvennyj                       String,
+            gorod                               String,
+            otvetstvennyjZaKomandirovki         String,
+            podrazdelenie                       String,
+            description                         String,
+            cel                                 String,
+            kadrovik                            String,
+            sotrudnik                           String,
+            buhgalter                           String,
+            unique                              String,
+            checklistDone                       decimal(15,2),
+            checklistTotal                      decimal(15,2),
+            checklistItems                      String,
+            stoimost                            decimal(15,2),
+            zatratyrub                          decimal(15,2),
+            programma                           String,
+            votedBy                             String,
+            aliases                             String,
+            previousQueue                       String,
+            emailCreatedBy                      String,
+            emailTo                             String,
+            emailFrom                           String,
+            dopolnitelnoeSoglasovanie           String,
+            soglasuusij                         String,
+            cenaBileta                          String,
+            rekruter                            String,
+            uhodasijSotrudnik                   String,
+            professia                           String,
+            dataObnovlenia                      DateTime('Europe/Moscow'),
+            otsutstvie                          String
         )
         ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/''' + TABLE + '''', '{replica}') 
         PARTITION BY id 
@@ -188,30 +242,61 @@ def init_database(drop_table=False):
     run_clickhouse_query(query)
 
 def run_clickhouse_query(query, connection_timeout=1500):
+    """
+    Exec clickhouse query
+    
+    Arguments:
+        query (string): Query string
+    Returns:
+        response from database
+    """
     url = 'https://{host}:8443/?database={db}'.format(
         host=os.environ['CH_HOST'],
         db=os.environ['CH_DB'])
+    #Run Clickhouse query, places in the body of POST request (Query string could be long and not fit in url string)
     response = requests.post(url, data=query, headers=AUTH, verify=CERT, timeout=connection_timeout)
     if response.status_code == 200:
         return response.text
     else:
         raise ValueError(response.text)
 
-def upload_data_to_db(df):
-    init_database(drop_table=False)
-    content = df.replace("\n", "\\\n", regex=True).iloc[20:].to_csv(index=False, sep='\t')
-    #print(df)
-    content = content.encode('utf-8')
+def upload_clickhouse_data(data, connection_timeout=1500):
+    """
+    Exec clickhouse query
+    
+    Arguments:
+        data (string): Data to be uploaded in CSV format
+    Returns:
+        response from database
+    """
+    url = 'https://{host}:8443/?database={db}'.format(
+        host=os.environ['CH_HOST'],
+        db=os.environ['CH_DB'])
     query_dict = {
         'query': 'INSERT INTO ' + TABLE + ' FORMAT TabSeparatedWithNames '
     }
-    r = requests.post(CH_URL, data=content, params=query_dict, headers=AUTH, verify=CERT)
-    result = r.text
-    if r.status_code == 200:
+    response = requests.post(CH_URL, data=data, params=query_dict, headers=AUTH, verify=CERT)
+    result = response.text
+    if response.status_code == 200:
         return result
     else:
-        print(r.text)
-        raise ValueError(r.text)
+        print(response.text)
+        raise ValueError(response.text)
+
+def upload_data_to_db(df):
+    """
+    Exec clickhouse query
+    
+    Arguments:
+        df (Dataframe): dataframe with tracker data
+    Returns:
+        Nothing
+    """
+    init_database(drop_table=False)
+    #Prepare data to upload: escaping \n to allow fields with new lines be represented correctly in CSV format 
+    content = df.replace("\n", "\\\n", regex=True).iloc[20:].to_csv(index=False, sep='\t')
+    content = content.encode('utf-8')
+    upload_clickhouse_data(content)
 
 tracker_json_data = get_tracker_data(TRACKER_API_URL_BASE)
 tracker_df_data = shape_data(tracker_json_data)
