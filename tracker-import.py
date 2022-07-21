@@ -7,7 +7,7 @@ TRACKER_API_URL_BASE = 'https://api.tracker.yandex.net/v2/issues/_search'
 TRACKER_API_URL_PARAMS = '?scrollType=unsorted&perScroll=1&scrollTTLMillis=10000'
 #TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
-TRACKER_QUERY_TEXT = 'updated: >now()-30d'
+TRACKER_QUERY_TEXT = 'updated: >now()-5d'
 
 YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
 YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
@@ -29,24 +29,61 @@ CERT = './YandexRootCA.pem'
 TABLE = os.environ['CH_TABLE']
 
 #Columns to load into database
-columns = ['organization_id', 'self', 'id', 'key', 'version', 'pendingReplyFrom',
-    'statusStartTime', 'Effort', 'boards', 'type',
-    'previousStatusLastAssignee', 'createdAt', 'Confidence',
-    'commentWithExternalMessageCount', 'deadline', 'updatedAt',
-    'lastCommentUpdatedAt', 'storyPoints', 'summary', 'Impact', 'Reach',
-    'originalEstimation', 'updatedBy', 'spent', 'start', 'priority',
-    'estimation', 'Score', 'followers', 'createdBy',
-    'commentWithoutExternalMessageCount', 'votes', 'assignee', 'queue',
-    'status', 'previousStatus', 'favorite', 'tags', 'components', 'end',
-    'parent', 'resolvedAt', 'resolvedBy', 'resolution', 'epic', 'sprint',
-    'project', 'sla', 'otvetstvennyj', 'gorod',
-    'otvetstvennyjZaKomandirovki', 'podrazdelenie', 'description', 'cel',
-    'kadrovik', 'sotrudnik', 'buhgalter', 'unique', 'checklistDone',
-    'checklistTotal', 'checklistItems', 'stoimost', 'zatratyrub',
-    'programma', 'votedBy', 'aliases', 'previousQueue', 'emailCreatedBy',
-    'emailTo', 'emailFrom', 'dopolnitelnoeSoglasovanie', 'soglasuusij',
-    'cenaBileta', 'rekruter', 'uhodasijSotrudnik', 'professia',
-    'dataObnovlenia', 'otsutstvie']
+columns = ['organization_id',
+            'self',
+            'id',
+            'key',
+            'version',
+            'storyPoints',
+            'summary',
+            'statusStartTime',
+            'boards_names',
+            'createdAt',
+            'commentWithoutExternalMessageCount',
+            'votes',
+            'commentWithExternalMessageCount',
+            'deadline',
+            'updatedAt',
+            'favorite',
+            'updatedBy_display',
+            'type_display',
+            'priority_display',
+            'createdBy_display',
+            'assignee_display',
+            'queue_key',
+            'queue_display',
+            'status_display',
+            'previousStatus_display',
+            'parent_key',
+            'parent_display',
+            'components_display',
+            'sprint',
+            'epic_display',
+            'previousStatusLastAssignee_display',
+            'originalEstimation',
+            'spent',
+            'tags',
+            'estimation',
+            'checklistDone',
+            'checklistTotal',
+            'emailCreatedBy',
+            'sla',
+            'emailTo',
+            'emailFrom',
+            'lastCommentUpdatedAt',
+            'followers',
+            'pendingReplyFrom',
+            'end',
+            'start',
+            'project_display',
+            'votedBy_display',
+            'aliases',
+            'previousQueue_display',
+            'access',
+            'resolvedAt',
+            'resolvedBy_display',
+            'resolution_display',
+            'lastQueue_display']
 
 def get_tracker_data(query_url_base=TRACKER_API_URL_BASE, headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT, perScroll=2):
     """
@@ -87,16 +124,43 @@ def shape_data(json_data):
     Returns:
         Pandas dataframe object with records
     """
-    raw_df = pd.json_normalize(json_data, max_level=0)
+    raw_df = pd.json_normalize(json_data, sep='_', max_level=2)
     raw_df.insert(0, 'organization_id', os.environ['TRACKER_ORG_ID'])
+    #for col_name in raw_df.columns:
+    #    print(col_name)
     
+    #function to transform boards column from list of dictionaries 
+    #to simple comma separated string
+    def format_boards_column(item):
+        if (type(item)==list):
+            s=''
+            for i in range(len(item)):
+                s += item[i]['name']
+                if i < len(item)-1:
+                    s += ', '
+            return s
+    #function to transform components column from list of dictionaries 
+    #to simple comma separated string
+    def format_components_column(item):
+        if (type(item)==list):
+            s=''
+            for i in range(len(item)):
+                s += item[i]['display']
+                if i < len(item)-1:
+                    s += ', '
+            return s
+
+    raw_df['boards_names'] = raw_df['boards'].apply(format_boards_column)
+    raw_df['components_display'] = raw_df['components'].apply(format_components_column)
+
     #filter out unnecessary colums
     shaped_df = pd.DataFrame(columns=columns)
     for col in columns:
         try:
             shaped_df[col] = raw_df[col]
         except KeyError as cerr:
-            shaped_df[col] = ""    
+            shaped_df[col] = ""
+
     #reformat dateTime columns
     #List of columns with dateTime data format
     date_time_columns: List[str] = [
@@ -106,29 +170,24 @@ def shape_data(json_data):
         'lastCommentUpdatedAt',
         'start',
         'end',
-        'resolvedAt',
-        'dataObnovlenia'
+        'resolvedAt'
     ]
     #Round dateTime columns up to seconds
     for col in date_time_columns:
-        shaped_df[col] = pd.to_datetime(shaped_df["statusStartTime"]).dt.tz_localize(None).round('S')
+        shaped_df[col] = pd.to_datetime(shaped_df[col]).dt.tz_localize(None).fillna('1970-01-01 00:00:00.000') #.round('S')
+        #apply Lambda fuction to each datetime column to unify datetime sting representation
+        shaped_df[col] = shaped_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])
+
 
     #reformat decimal columns
     #List of columns with decimal data format
     decimal_columns: List[str] = [
-        'Effort',
-        'Confidence',
-        'commentWithExternalMessageCount',
         'storyPoints',
-        'Impact',
-        'Reach',
-        'Score',
+        'commentWithExternalMessageCount',
         'commentWithoutExternalMessageCount',
         'votes',
         'checklistDone',
-        'checklistTotal',
-        'stoimost',
-        'zatratyrub'
+        'checklistTotal'
     ]
     #Round dateTime columns up to 2 digits after comma
     for col in decimal_columns:
@@ -150,89 +209,66 @@ def init_database(drop_table=False):
         run_clickhouse_query(query)
 
     query = '''
-        CREATE TABLE IF NOT EXISTS ''' + TABLE + ''' on cluster '{cluster}'
+        CREATE TABLE IF NOT EXISTS ''' + TABLE + '''
         (
             organization_id                     String,
             self                                String,
             id                                  String,
             key                                 String,
             version                             String,
-            pendingReplyFrom                    String,
-            statusStartTime                     DateTime('Europe/Moscow'),
-            Effort                              decimal(15,2),
-            boards                              String,
-            type                                String,
-            previousStatusLastAssignee          String,
-            createdAt                           DateTime('Europe/Moscow'),
-            Confidence                          decimal(15,2),
-            commentWithExternalMessageCount     decimal(15,2),
-            deadline                            String,
-            updatedAt                           DateTime('Europe/Moscow'),
-            lastCommentUpdatedAt                DateTime('Europe/Moscow'),
-            storyPoints                         decimal(15,2),
+            storyPoints                         Decimal(15,2),
             summary                             String,
-            Impact                              decimal(15,2),
-            Reach                               decimal(15,2),
-            originalEstimation                  String,
-            updatedBy                           String,
-            spent                               String,
-            start                               DateTime('Europe/Moscow'),
-            priority                            String,
-            estimation                          String,
-            Score                               decimal(15,2),
-            followers                           String,
-            createdBy                           String,
-            commentWithoutExternalMessageCount  decimal(15,2),
-            votes                               decimal(15,2),
-            assignee                            String,
-            queue                               String,
-            status                              String,
-            previousStatus                      String,
+            statusStartTime                         DateTime64(3, 'Europe/Moscow'),
+            boards_names                        String,
+            createdAt                               DateTime64(3, 'Europe/Moscow'),
+            commentWithoutExternalMessageCount  Decimal(15,2),
+            votes                               Decimal(15,2),
+            commentWithExternalMessageCount     Decimal(15,2),
+            deadline                            String,
+            updatedAt                               DateTime64(3, 'Europe/Moscow'),
             favorite                            String,
-            tags                                String,
-            components                          String,
-            end                                 DateTime('Europe/Moscow'),
-            parent                              String,
-            resolvedAt                          DateTime('Europe/Moscow'),
-            resolvedBy                          String,
-            resolution                          String,
-            epic                                String,
+            updatedBy_display                   String,
+            type_display                        String,
+            priority_display                    String,
+            createdBy_display                   String,
+            assignee_display                    String,
+            queue_key                           String,
+            queue_display                       String,
+            status_display                      String,
+            previousStatus_display              String,
+            parent_key                          String,
+            parent_display                      String,
+            components_display                  String,
             sprint                              String,
-            project                             String,
-            sla                                 String,
-            otvetstvennyj                       String,
-            gorod                               String,
-            otvetstvennyjZaKomandirovki         String,
-            podrazdelenie                       String,
-            description                         String,
-            cel                                 String,
-            kadrovik                            String,
-            sotrudnik                           String,
-            buhgalter                           String,
-            unique                              String,
-            checklistDone                       decimal(15,2),
-            checklistTotal                      decimal(15,2),
-            checklistItems                      String,
-            stoimost                            decimal(15,2),
-            zatratyrub                          decimal(15,2),
-            programma                           String,
-            votedBy                             String,
-            aliases                             String,
-            previousQueue                       String,
+            epic_display                        String,
+            previousStatusLastAssignee_display  String,
+            originalEstimation                  String,
+            spent                               String,
+            tags                                String,
+            estimation                          String,
+            checklistDone                       Decimal(15,2),
+            checklistTotal                      Decimal(15,2),
             emailCreatedBy                      String,
+            sla                                 String,
             emailTo                             String,
             emailFrom                           String,
-            dopolnitelnoeSoglasovanie           String,
-            soglasuusij                         String,
-            cenaBileta                          String,
-            rekruter                            String,
-            uhodasijSotrudnik                   String,
-            professia                           String,
-            dataObnovlenia                      DateTime('Europe/Moscow'),
-            otsutstvie                          String
+            lastCommentUpdatedAt                    DateTime64(3, 'Europe/Moscow'),
+            followers                           String,
+            pendingReplyFrom                    String,
+            end                                     DateTime64(3, 'Europe/Moscow'),
+            start                                   DateTime64(3, 'Europe/Moscow'),
+            project_display                     String,
+            votedBy_display                     String,
+            aliases                             String,
+            previousQueue_display               String,
+            access                              String,
+            resolvedAt                              DateTime64(3, 'Europe/Moscow'),
+            resolvedBy_display                  String,
+            resolution_display                  String,
+            lastQueue_display                   String
         )
         ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/''' + TABLE + '''', '{replica}') 
-        PARTITION BY id 
+        --PARTITION BY id 
         ORDER BY (id) 
         '''
     run_clickhouse_query(query)
@@ -269,7 +305,7 @@ def upload_clickhouse_data(data, connection_timeout=1500):
         host=os.environ['CH_HOST'],
         db=os.environ['CH_DB'])
     query_dict = {
-        'query': 'INSERT INTO ' + TABLE + ' FORMAT TabSeparatedWithNames '
+        'query': 'INSERT INTO ' + TABLE + ' FORMAT TabSeparatedWithNames'
     }
     response = requests.post(CH_URL, data=data, params=query_dict, headers=AUTH, verify=CERT)
     result = response.text
@@ -290,8 +326,8 @@ def upload_data_to_db(df):
     """
     init_database(drop_table=False)
     #Prepare data to upload: escaping \n to allow fields with new lines be represented correctly in CSV format 
-    content = df.replace("\n", "\\\n", regex=True).iloc[20:].to_csv(index=False, sep='\t')
-    content = content.encode('utf-8')
+    content = df.replace("\n", "\\\n", regex=True).to_csv(index=False, sep='\t') #.iloc[:]
+    content = content.encode('utf-8')    
     upload_clickhouse_data(content)
 
 tracker_json_data = get_tracker_data(TRACKER_API_URL_BASE)
@@ -305,3 +341,5 @@ upload_data_to_db(tracker_df_data)
 
 #df.description.iloc[15:25].str.replace('\n','\\\n')
 #df.replace('\n','\\\n',regex=True).iloc[15:25,49:50]
+
+#tracker_df_data[['key', 'statusStartTime', 'lastCommentUpdatedAt', 'start', 'end', 'createdAt', 'updatedAt']].iloc[1].to_csv(index=False, sep='\t', date_format='%r')
