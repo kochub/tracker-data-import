@@ -10,7 +10,7 @@ TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWo
 
 #TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
-TRACKER_QUERY_TEXT = 'updated: >now()-15d'
+TRACKER_QUERY_TEXT = 'updated: >now()-1d'
 
 YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
 YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
@@ -29,10 +29,11 @@ AUTH = {
     'X-ClickHouse-Key': CH_PASSWORD,
 }
 CERT = './YandexRootCA.pem'
-TABLE = os.environ['CH_TABLE']
+CH_ISSUES_TABLE = os.environ['CH_ISSUES_TABLE']
+CH_CHANGELOG_TABLE = os.environ['CH_CHANGELOG_TABLE']
 
 #Columns to load into database
-columns = ['organization_id',
+issues_columns = ['organization_id',
             'self',
             'id',
             'key',
@@ -87,6 +88,13 @@ columns = ['organization_id',
             'resolvedBy_display',
             'resolution_display',
             'lastQueue_display']
+
+issue_changelog_columns = ['id',
+            'issue_key',
+            'updatedAt',
+            'updatedBy_display',
+            'type',
+            'fields']
 
 def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT):
     """
@@ -154,14 +162,21 @@ def get_tracker_issue_changelog_for_key(issue_key='', headers=TRACKER_HEADERS, q
     return changelog_data
 
 def get_tracker_issues_changelog(issues_json_data):
-    print('test')
+    """
+    Collect changelog for isssues represented in json
+    
+    Arguments:
+        issues_json_data (json): input JSON data
+    Returns:
+        Pandas json object with records
+    """
     changelog_json = []
     for i in issues_json_data:
         changelog_json.extend(get_tracker_issue_changelog_for_key(issue_key=i['key']))
 
     return changelog_json
 
-def shape_data(json_data):
+def shape_issues_data(json_data):
     """
     Convert json data to Pandas dataframe and add 'org_id' column
     
@@ -172,8 +187,6 @@ def shape_data(json_data):
     """
     raw_df = pd.json_normalize(json_data, sep='_', max_level=2)
     raw_df.insert(0, 'organization_id', os.environ['TRACKER_ORG_ID'])
-    #for col_name in raw_df.columns:
-    #    print(col_name)
     
     #function to transform boards column from list of dictionaries 
     #to simple comma separated string
@@ -196,12 +209,18 @@ def shape_data(json_data):
                     s += ', '
             return s
 
-    raw_df['boards_names'] = raw_df['boards'].apply(format_boards_column)
-    raw_df['components_display'] = raw_df['components'].apply(format_components_column)
+    try:
+        raw_df['boards_names'] = raw_df['boards'].apply(format_boards_column)
+    except KeyError:
+        pass
+    try:
+        raw_df['components_display'] = raw_df['components'].apply(format_components_column)
+    except KeyError:
+        pass
 
     #filter out unnecessary colums
-    shaped_df = pd.DataFrame(columns=columns)
-    for col in columns:
+    shaped_df = pd.DataFrame(columns=issues_columns)
+    for col in issues_columns:
         try:
             shaped_df[col] = raw_df[col]
         except KeyError as cerr:
@@ -241,6 +260,38 @@ def shape_data(json_data):
 
     return shaped_df
 
+def shape_issue_changelog_data(json_data):
+    """
+    Convert issues changelog json data to Pandas dataframe
+    
+    Arguments:
+        json_data (json): input JSON data
+    Returns:
+        Pandas dataframe object with records
+    """
+    raw_df = pd.json_normalize(json_data, sep='_', max_level=2)
+
+    #filter our unnecessary columns
+    shaped_df = pd.DataFrame(columns=issue_changelog_columns)
+    for col in issue_changelog_columns:
+        try:
+            shaped_df[col] = raw_df[col]
+        except KeyError:
+            shaped_df[col] = ''
+    
+    #reformat dateTime columns
+    #List of columns with dateTime data format
+    date_time_columns: List[str] = [
+        'updatedAt'
+    ]   
+    #Round dateTime columns up to seconds
+    for col in date_time_columns:
+        shaped_df[col] = pd.to_datetime(shaped_df[col]).dt.tz_localize(None).fillna('1970-01-01 00:00:00.000') #.round('S')
+        #apply Lambda fuction to each datetime column to unify datetime sting representation - trim tast 3 symbols of microseconds
+        shaped_df[col] = shaped_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])
+
+    return shaped_df
+
 def init_database(drop_table=False):
     """
     Initialise Clickhouse DB: Dropping & CReating table with columns
@@ -251,11 +302,11 @@ def init_database(drop_table=False):
         Nothing
     """
     if (drop_table):
-        query = '''drop table if exists ''' + TABLE + ''' on cluster '{cluster}';'''
-        run_clickhouse_query(query)
+        drop_issues_table_query = '''drop table if exists ''' + CH_ISSUES_TABLE + ''';'''
+        run_clickhouse_query(drop_issues_table_query)
 
-    query = '''
-        CREATE TABLE IF NOT EXISTS ''' + TABLE + ''' on cluster '{cluster}'
+    create_issues_table_query = '''
+        CREATE TABLE IF NOT EXISTS ''' + CH_ISSUES_TABLE + '''
         (
             organization_id                     String,
             self                                String,
@@ -313,11 +364,30 @@ def init_database(drop_table=False):
             resolution_display                  String,
             lastQueue_display                   String
         )
-        ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/''' + TABLE + '''', '{replica}') 
-        --PARTITION BY id 
+        ENGINE = MergeTree()  
         ORDER BY (id) 
         '''
-    run_clickhouse_query(query)
+    run_clickhouse_query(create_issues_table_query)
+
+    #issues changelog data
+    if (drop_table):
+        drop_changelog_table_query = '''drop table if exists ''' + CH_CHANGELOG_TABLE + ''';'''
+        run_clickhouse_query(drop_changelog_table_query)
+
+    create_changelog_table_query = '''
+        CREATE TABLE IF NOT EXISTS ''' + CH_CHANGELOG_TABLE + '''
+        (
+            id                                  String,
+            issue_key                           String,
+            updatedAt                           DateTime64(3, 'Europe/Moscow'),
+            updatedBy_display                   String,
+            type                                String,
+            fields                              String
+        )
+        ENGINE = MergeTree()  
+        ORDER BY (id) 
+        '''
+    run_clickhouse_query(create_changelog_table_query)
 
 def run_clickhouse_query(query, connection_timeout=1500):
     """
@@ -338,7 +408,7 @@ def run_clickhouse_query(query, connection_timeout=1500):
     else:
         raise ValueError(response.text)
 
-def upload_clickhouse_data(data, connection_timeout=1500):
+def upload_clickhouse_data(data, table_name):
     """
     Exec clickhouse query
     
@@ -347,11 +417,13 @@ def upload_clickhouse_data(data, connection_timeout=1500):
     Returns:
         response from database
     """
+    """
     url = 'https://{host}:8443/?database={db}'.format(
         host=os.environ['CH_HOST'],
         db=os.environ['CH_DB'])
+    """
     query_dict = {
-        'query': 'INSERT INTO ' + TABLE + ' FORMAT TabSeparatedWithNames'
+        'query': 'INSERT INTO ' + table_name + ' FORMAT TabSeparatedWithNames'
     }
     response = requests.post(CH_URL, data=data, params=query_dict, headers=AUTH, verify=CERT)
     result = response.text
@@ -361,7 +433,7 @@ def upload_clickhouse_data(data, connection_timeout=1500):
         print(response.text)
         raise ValueError(response.text)
 
-def upload_data_to_db(df):
+def upload_data_to_db(issues_df, changelog_df):
     """
     Exec clickhouse query
     
@@ -371,16 +443,20 @@ def upload_data_to_db(df):
         Nothing
     """
     init_database(drop_table=False)
-    #Prepare data to upload: escaping \n to allow fields with new lines be represented correctly in CSV format 
-    content = df.replace("\n", "\\\n", regex=True).to_csv(index=False, sep='\t') #.iloc[:]
-    content = content.encode('utf-8')    
-    upload_clickhouse_data(content)
+    #Prepare issues data to upload: escaping \n to allow fields with new lines be represented correctly in CSV format 
+    issues_content = issues_df.replace("\n", "\\\n", regex=True).to_csv(index=False, sep='\t')
+    issues_content = issues_content.encode('utf-8')
+    #Prepare changelog data to upload: escaping \n to allow fields with new lines be represented correctly in CSV format 
+    changelog_content = changelog_df.replace("\n", "\\\n", regex=True).to_csv(index=False, sep='\t')
+    changelog_content = changelog_content.encode('utf-8')   
+    upload_clickhouse_data(issues_content, CH_ISSUES_TABLE)
+    upload_clickhouse_data(changelog_content, CH_CHANGELOG_TABLE)
 
 tracker_isses_json_data = get_tracker_issue_list(TRACKER_API_URL_BASE_FOR_ISSUE_LIST)
-#get_tracker_issue_changelog(issue_key='YGJHG-1')
-get_tracker_issues_changelog(tracker_isses_json_data)
-tracker_df_data = shape_data(tracker_isses_json_data)
-upload_data_to_db(tracker_df_data)
+tracker_isses_changelog_json_data = get_tracker_issues_changelog(tracker_isses_json_data)
+tracker_issues_df_data = shape_issues_data(tracker_isses_json_data)
+tracker_issues_changelog_df_data = shape_issue_changelog_data(tracker_isses_changelog_json_data)
+upload_data_to_db(tracker_issues_df_data, tracker_issues_changelog_df_data)
 
 #test_clickhouse_query('SELECT version()')
 
