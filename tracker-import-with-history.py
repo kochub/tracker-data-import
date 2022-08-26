@@ -1,3 +1,4 @@
+from telnetlib import NOP
 from typing import List
 import requests
 import os
@@ -10,7 +11,7 @@ TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWo
 
 #TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
-TRACKER_QUERY_TEXT = 'updated: >now()-1d'
+TRACKER_QUERY_TEXT = 'updated: >now()-365d'
 
 YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
 YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
@@ -94,7 +95,9 @@ issue_changelog_columns = ['id',
             'updatedAt',
             'updatedBy_display',
             'type',
-            'fields']
+            'field_display',
+            'from_display',
+            'to_display']
 
 def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT):
     """
@@ -270,7 +273,35 @@ def shape_issue_changelog_data(json_data):
         Pandas dataframe object with records
     """
     raw_df = pd.json_normalize(json_data, sep='_', max_level=2)
+    #expand list in the 'fields' field to duplicate rows
+    raw_df = raw_df.explode('fields')
+    t=1
 
+    #get (fields -> field -> display) data
+    def get_field_display(item):
+        s = item['field']['display']
+        return s
+
+    #get (fields -> from -> display) data
+    def get_from_display(item):
+        if item['field']['id'] == 'status':
+            s = item['from']['display']
+        else:
+            s = item['from'] 
+        return s
+
+    #get (fields -> to -> display) data
+    def get_to_display(item):
+        if item['field']['id'] == 'status':
+            s = item['to']['display']
+        else:
+            s = item['to'] 
+        return s
+ 
+    raw_df['field_display'] = raw_df['fields'].apply(get_field_display)
+    raw_df['from_display'] = raw_df['fields'].apply(get_from_display)
+    raw_df['to_display'] = raw_df['fields'].apply(get_to_display)
+    
     #filter our unnecessary columns
     shaped_df = pd.DataFrame(columns=issue_changelog_columns)
     for col in issue_changelog_columns:
@@ -364,7 +395,7 @@ def init_database(drop_table=False):
             resolution_display                  String,
             lastQueue_display                   String
         )
-        ENGINE = MergeTree()  
+        ENGINE = ReplacingMergeTree()  
         ORDER BY (id) 
         '''
     run_clickhouse_query(create_issues_table_query)
@@ -382,12 +413,69 @@ def init_database(drop_table=False):
             updatedAt                           DateTime64(3, 'Europe/Moscow'),
             updatedBy_display                   String,
             type                                String,
-            fields                              String
+            field_display                       String,
+            from_display                        String,
+            to_display                          String
         )
-        ENGINE = MergeTree()  
-        ORDER BY (id) 
+        ENGINE = ReplacingMergeTree()  
+        ORDER BY (id, field_display) 
         '''
     run_clickhouse_query(create_changelog_table_query)
+    
+    create_issues_view = '''
+        CREATE OR REPLACE VIEW v_tracker_issues AS
+        SELECT organization_id, `self`, id, `key`, version, storyPoints, 
+        summary, statusStartTime, boards_names, createdAt, 
+        commentWithoutExternalMessageCount, votes, 
+        commentWithExternalMessageCount, deadline, updatedAt, favorite, 
+        updatedBy_display, type_display, priority_display, 
+        createdBy_display, assignee_display, queue_key, queue_display, 
+        status_display, previousStatus_display, parent_key, parent_display, 
+        components_display, sprint, epic_display, 
+        previousStatusLastAssignee_display, originalEstimation, spent, 
+        tags, estimation, checklistDone, checklistTotal, emailCreatedBy,
+        sla, emailTo, emailFrom, lastCommentUpdatedAt, followers, 
+        pendingReplyFrom, `end`, `start`, project_display, 
+        votedBy_display, aliases, previousQueue_display, access, 
+        resolvedAt, resolvedBy_display, resolution_display, 
+        lastQueue_display
+        FROM (
+            SELECT organization_id, `self`, id, `key`, version, storyPoints, 
+            summary, statusStartTime, boards_names, createdAt, 
+            commentWithoutExternalMessageCount, votes, 
+            commentWithExternalMessageCount, deadline, updatedAt, favorite, 
+            updatedBy_display, type_display, priority_display, 
+            createdBy_display, assignee_display, queue_key, queue_display, 
+            status_display, previousStatus_display, parent_key, parent_display, 
+            components_display, sprint, epic_display, 
+            previousStatusLastAssignee_display, originalEstimation, spent, 
+            tags, estimation, checklistDone, checklistTotal, emailCreatedBy,
+            sla, emailTo, emailFrom, lastCommentUpdatedAt, followers, 
+            pendingReplyFrom, `end`, `start`, project_display, 
+            votedBy_display, aliases, previousQueue_display, access, 
+            resolvedAt, resolvedBy_display, resolution_display, 
+            lastQueue_display,
+            row_number() over (partition by id order by `key`) as lvl
+            FROM db1.''' + CH_ISSUES_TABLE + '''
+        ) T WHERE T.lvl = 1;
+    '''
+    run_clickhouse_query(create_issues_view)
+
+    create_changelog_view = '''
+        CREATE OR REPLACE VIEW v_tracker_changelog AS
+        SELECT id, issue_key, updatedAt, updatedBy_display, `type`,
+        field_display, from_display, to_display 
+        FROM (
+            SELECT id, issue_key, updatedAt, updatedBy_display, `type`,
+            field_display, from_display, to_display,
+            row_number() over (partition by id order by issue_key desc) as lvl
+            FROM db1.''' + CH_CHANGELOG_TABLE + '''
+        ) T WHERE T.lvl = 1;
+    '''
+    run_clickhouse_query(create_changelog_view)
+
+    
+
 
 def run_clickhouse_query(query, connection_timeout=1500):
     """
