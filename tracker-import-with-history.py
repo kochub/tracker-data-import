@@ -1,4 +1,3 @@
-from telnetlib import NOP
 from typing import List
 import requests
 import os
@@ -13,11 +12,11 @@ TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWo
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
 TRACKER_QUERY_TEXT = 'updated: >now()-730d'
 
-YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
-YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
-YC_S3_ENDPOINT_URL = os.environ['YC_S3_ENDPOINT_URL']
-YC_S3_BUCKET_NAME = os.environ['YC_S3_BUCKET_NAME']
-YC_S3_FILENAME = os.environ['YC_S3_FILENAME']
+#YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
+#YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
+#YC_S3_ENDPOINT_URL = os.environ['YC_S3_ENDPOINT_URL']
+#YC_S3_BUCKET_NAME = os.environ['YC_S3_BUCKET_NAME']
+#YC_S3_FILENAME = os.environ['YC_S3_FILENAME']
 #Number of YandexTracker issues retrieved per request
 #RESULTS_PER_PAGE = 20
 #ClickHouse params
@@ -548,20 +547,9 @@ def upload_data_to_db(issues_df, changelog_df):
     upload_clickhouse_data(issues_content, CH_ISSUES_TABLE)
     upload_clickhouse_data(changelog_content, CH_CHANGELOG_TABLE)
 
-tracker_isses_json_data = get_tracker_issue_list(TRACKER_API_URL_BASE_FOR_ISSUE_LIST)
-tracker_isses_changelog_json_data = get_tracker_issues_changelog(tracker_isses_json_data)
-tracker_issues_df_data = shape_issues_data(tracker_isses_json_data)
-tracker_issues_changelog_df_data = shape_issue_changelog_data(tracker_isses_changelog_json_data)
-upload_data_to_db(tracker_issues_df_data, tracker_issues_changelog_df_data)
-
-#test_clickhouse_query('SELECT version()')
-
-#query='SELECT version()'
-#run_clickhouse_query(query)
-
-#df.description.iloc[15:25].str.replace('\n','\\\n')
-#df.replace('\n','\\\n',regex=True).iloc[15:25,49:50]
-
-#tracker_df_data[['key', 'statusStartTime', 'lastCommentUpdatedAt', 'start', 'end', 'createdAt', 'updatedAt']].iloc[1].to_csv(index=False, sep='\t', date_format='%r')
-
-#raw_df.query('not worklog.isnull()')
+def handler(event, context):
+    tracker_isses_json_data = get_tracker_issue_list(TRACKER_API_URL_BASE_FOR_ISSUE_LIST)
+    tracker_isses_changelog_json_data = get_tracker_issues_changelog(tracker_isses_json_data)
+    tracker_issues_df_data = shape_issues_data(tracker_isses_json_data)
+    tracker_issues_changelog_df_data = shape_issue_changelog_data(tracker_isses_changelog_json_data)
+    upload_data_to_db(tracker_issues_df_data, tracker_issues_changelog_df_data)
