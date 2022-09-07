@@ -11,7 +11,7 @@ TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWo
 
 #TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
-TRACKER_QUERY_TEXT = 'updated: >now()-365d'
+TRACKER_QUERY_TEXT = 'updated: >now()-730d'
 
 YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
 YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
@@ -97,7 +97,8 @@ issue_changelog_columns = ['id',
             'type',
             'field_display',
             'from_display',
-            'to_display']
+            'to_display',
+            'worklog']
 
 def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT):
     """
@@ -284,18 +285,24 @@ def shape_issue_changelog_data(json_data):
 
     #get (fields -> from -> display) data
     def get_from_display(item):
-        if item['field']['id'] == 'status':
-            s = item['from']['display']
-        else:
-            s = item['from'] 
+        try: 
+            if item['field']['id'] in ('status', 'resolution', 'assignee') :
+                s = item['from']['display']
+            else:
+                s = item['from'] 
+        except: 
+            s = ''
         return s
 
     #get (fields -> to -> display) data
     def get_to_display(item):
-        if item['field']['id'] == 'status':
-            s = item['to']['display']
-        else:
-            s = item['to'] 
+        try: 
+            if item['field']['id'] in ('status', 'resolution', 'assignee'):
+                s = item['to']['display']
+            else:
+                s = item['to']
+        except: 
+            s = ''
         return s
  
     raw_df['field_display'] = raw_df['fields'].apply(get_field_display)
@@ -415,7 +422,8 @@ def init_database(drop_table=False):
             type                                String,
             field_display                       String,
             from_display                        String,
-            to_display                          String
+            to_display                          String,
+            worklog                             String
         )
         ENGINE = ReplacingMergeTree()  
         ORDER BY (id, field_display) 
@@ -455,7 +463,7 @@ def init_database(drop_table=False):
             votedBy_display, aliases, previousQueue_display, access, 
             resolvedAt, resolvedBy_display, resolution_display, 
             lastQueue_display,
-            row_number() over (partition by id order by `key`) as lvl
+            row_number() over (partition by id order by updatedAt desc) as lvl
             FROM db1.''' + CH_ISSUES_TABLE + '''
         ) T WHERE T.lvl = 1;
     '''
@@ -464,11 +472,11 @@ def init_database(drop_table=False):
     create_changelog_view = '''
         CREATE OR REPLACE VIEW v_tracker_changelog AS
         SELECT id, issue_key, updatedAt, updatedBy_display, `type`,
-        field_display, from_display, to_display 
+        field_display, from_display, to_display, worklog
         FROM (
             SELECT id, issue_key, updatedAt, updatedBy_display, `type`,
-            field_display, from_display, to_display,
-            row_number() over (partition by id order by issue_key desc) as lvl
+            field_display, from_display, to_display, worklog,
+            row_number() over (partition by id, field_display order by updatedAt desc) as lvl
             FROM db1.''' + CH_CHANGELOG_TABLE + '''
         ) T WHERE T.lvl = 1;
     '''
@@ -555,3 +563,5 @@ upload_data_to_db(tracker_issues_df_data, tracker_issues_changelog_df_data)
 #df.replace('\n','\\\n',regex=True).iloc[15:25,49:50]
 
 #tracker_df_data[['key', 'statusStartTime', 'lastCommentUpdatedAt', 'start', 'end', 'createdAt', 'updatedAt']].iloc[1].to_csv(index=False, sep='\t', date_format='%r')
+
+#raw_df.query('not worklog.isnull()')
