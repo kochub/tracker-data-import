@@ -11,7 +11,7 @@ TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWo
 
 #TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
-TRACKER_QUERY_TEXT = 'updated: >now()-730d'
+#TRACKER_QUERY_TEXT = 'updated: >now()-730d'
 try:
     TRACKER_INITIAL_HISTORY_DEPTH = os.environ['TRACKER_INITIAL_HISTORY_DEPTH']
 except:
@@ -86,7 +86,8 @@ issues_columns = ['organization_id',
             'resolution_display',
             'lastQueue_display']
 
-issue_changelog_columns = ['id',
+issue_changelog_columns = ['organization_id',
+            'id',
             'issue_key',
             'updatedAt',
             'updatedBy_display',
@@ -123,7 +124,7 @@ def get_issues_query_text():
         return 'updated: >now() - 1y'
 
 
-def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT):
+def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, headers=TRACKER_HEADERS, query_text='updated: >now()-1y'):
     """
     Load issue list from Yandex Tracker using scroll method, see doc:
     https://cloud.yandex.ru/docs/tracker/concepts/issues/search-issues#scroll
@@ -297,6 +298,7 @@ def shape_issue_changelog_data(json_data):
         Pandas dataframe object with records
     """
     raw_df = pd.json_normalize(json_data, sep='_', max_level=2)
+    raw_df.insert(0, 'organization_id', os.environ['TRACKER_ORG_ID'])
     #expand list in the 'fields' field to duplicate rows
     raw_df = raw_df.explode('fields')
     t=1
@@ -438,6 +440,7 @@ def init_database(drop_table=False):
     create_changelog_table_query = '''
         CREATE TABLE IF NOT EXISTS ''' + CH_CHANGELOG_TABLE + '''
         (
+            organization_id                     String,
             id                                  String,
             issue_key                           String,
             updatedAt                           DateTime64(3, 'Europe/Moscow'),
@@ -497,9 +500,9 @@ def init_database(drop_table=False):
         SELECT id, issue_key, updatedAt, updatedBy_display, `type`,
         field_display, from_display, to_display, worklog
         FROM (
-            SELECT id, issue_key, updatedAt, updatedBy_display, `type`,
+            SELECT organization_id, id, issue_key, updatedAt, updatedBy_display, `type`,
             field_display, from_display, to_display, worklog,
-            row_number() over (partition by id, field_display order by updatedAt desc) as lvl
+            row_number() over (partition by organization_id, id, field_display order by updatedAt desc) as lvl
             FROM db1.''' + CH_CHANGELOG_TABLE + '''
         ) T WHERE T.lvl = 1;
     '''
