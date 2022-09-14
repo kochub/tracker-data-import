@@ -2,6 +2,7 @@ from typing import List
 import requests
 import os
 import pandas as pd
+from datetime import datetime, timedelta
 
 TRACKER_API_URL_BASE_FOR_ISSUE_LIST = 'https://api.tracker.yandex.net/v2/issues/_search'
 TRACKER_API_URL_PARAMS_FOR_ISSUE_LIST = '?scrollType=unsorted&perScroll=100&scrollTTLMillis=10000'
@@ -11,14 +12,10 @@ TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWo
 #TRACKER_HEADERS = os.environ['TRACKER_HEADERS']
 TRACKER_HEADERS = {'X-Org-ID' : os.environ['TRACKER_ORG_ID'], 'Authorization' : 'OAuth '+ os.environ['TRACKER_OAUTH_TOKEN']}
 TRACKER_QUERY_TEXT = 'updated: >now()-730d'
-
-#YC_S3_ACCESS_KEY_ID = os.environ['YC_S3_ACCESS_KEY_ID']
-#YC_S3_SECRET_ACCESS_KEY = os.environ['YC_S3_SECRET_ACCESS_KEY']
-#YC_S3_ENDPOINT_URL = os.environ['YC_S3_ENDPOINT_URL']
-#YC_S3_BUCKET_NAME = os.environ['YC_S3_BUCKET_NAME']
-#YC_S3_FILENAME = os.environ['YC_S3_FILENAME']
-#Number of YandexTracker issues retrieved per request
-#RESULTS_PER_PAGE = 20
+try:
+    TRACKER_INITIAL_HISTORY_DEPTH = os.environ['TRACKER_INITIAL_HISTORY_DEPTH']
+except:
+    TRACKER_INITIAL_HISTORY_DEPTH=''
 #ClickHouse params
 CH_PASSWORD = os.environ['CH_PASSWORD']
 CH_URL = 'https://{host}:8443/?database={db}'.format(
@@ -99,6 +96,33 @@ issue_changelog_columns = ['id',
             'to_display',
             'worklog']
 
+def get_issues_query_text():
+    """
+    Get latest lecord which has been loaded to tracker_isuues table:    
+    Arguments:
+        query_url_base (str): Yandex Tracker API URL base
+        headers (str): Yandex Tracker API Haders
+        query_text (str): Yandex Tracker query for search issues
+    Returns:
+        json object with records
+    """
+    # Get latest updated issue form database
+    get_max_uploaded_at_query='select MAX(updatedAt) from tracker_issues'
+    response=run_clickhouse_query(get_max_uploaded_at_query)
+    latest_record_time = datetime.strptime(response[:-5], "%Y-%m-%d %H:%M:%S")
+
+    if latest_record_time > datetime.strptime('1970-01-01 03:00:00', "%Y-%m-%d %H:%M:%S"):
+        # subtract 5 minutes to handle possible time overlapping & late updates
+        start_time = str(latest_record_time - timedelta(minutes=5))
+        tracker_query_text = 'updated: > "' + start_time + '"'
+        return tracker_query_text
+    elif TRACKER_INITIAL_HISTORY_DEPTH != '':
+        tracker_query_text = 'updated: >now()-' + TRACKER_INITIAL_HISTORY_DEPTH
+        return tracker_query_text
+    else:
+        return 'updated: >now() - 1y'
+
+
 def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT):
     """
     Load issue list from Yandex Tracker using scroll method, see doc:
@@ -115,7 +139,7 @@ def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, h
     #Query to filter Tracker issues
     query_body={'query': query_text}
     #Make Tracker API call
-    response = requests.post(query_url, headers=headers, json=query_body)
+    response = requests.post(query_url, headers=headers, json=query_body) #response = requests.post(query_url, headers=headers, json=query_body)
     issues_data = response.json()
     
     #loop wile number of collected data less than tootal records in query result
@@ -129,7 +153,7 @@ def get_tracker_issue_list(query_url_base=TRACKER_API_URL_BASE_FOR_ISSUE_LIST, h
     print('Tracker data loaded, total records: ', len(issues_data))
     return issues_data
 
-def get_tracker_issue_changelog_for_key(issue_key='', headers=TRACKER_HEADERS, query_text=TRACKER_QUERY_TEXT):
+def get_tracker_issue_changelog_for_key(issue_key='', headers=TRACKER_HEADERS):
     """
     Load issue changelog from Yandex Tracker using scroll method, see doc:
     https://cloud.yandex.ru/docs/tracker/concepts/issues/search-issues#scroll
@@ -481,9 +505,6 @@ def init_database(drop_table=False):
     '''
     run_clickhouse_query(create_changelog_view)
 
-    
-
-
 def run_clickhouse_query(query, connection_timeout=1500):
     """
     Exec clickhouse query
@@ -530,14 +551,15 @@ def upload_clickhouse_data(data, table_name):
 
 def upload_data_to_db(issues_df, changelog_df):
     """
-    Exec clickhouse query
+    Upload two datafarems to database
     
     Arguments:
-        df (Dataframe): dataframe with tracker data
+        issues_df (Dataframe): dataframe with tracker data
+        changelog_df (Dataframe): dataframe with issues changelog data
     Returns:
         Nothing
     """
-    init_database(drop_table=False)
+    #init_database(drop_table=False)
     #Prepare issues data to upload: escaping \n to allow fields with new lines be represented correctly in CSV format 
     issues_content = issues_df.replace("\n", "\\\n", regex=True).to_csv(index=False, sep='\t')
     issues_content = issues_content.encode('utf-8')
@@ -548,8 +570,13 @@ def upload_data_to_db(issues_df, changelog_df):
     upload_clickhouse_data(changelog_content, CH_CHANGELOG_TABLE)
 
 def handler(event, context):
-    tracker_isses_json_data = get_tracker_issue_list(TRACKER_API_URL_BASE_FOR_ISSUE_LIST)
+    init_database(drop_table=False)
+    tracker_query_text = get_issues_query_text()
+    tracker_isses_json_data = get_tracker_issue_list(TRACKER_API_URL_BASE_FOR_ISSUE_LIST, query_text=tracker_query_text)
     tracker_isses_changelog_json_data = get_tracker_issues_changelog(tracker_isses_json_data)
     tracker_issues_df_data = shape_issues_data(tracker_isses_json_data)
     tracker_issues_changelog_df_data = shape_issue_changelog_data(tracker_isses_changelog_json_data)
     upload_data_to_db(tracker_issues_df_data, tracker_issues_changelog_df_data)
+
+if __name__ == "__main__":
+    handler(None, None);
