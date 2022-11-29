@@ -25,7 +25,8 @@ AUTH = {
     'X-ClickHouse-User': os.environ['CH_USER'],
     'X-ClickHouse-Key': CH_PASSWORD,
 }
-CERT = './YandexRootCA.pem'
+#CERT = './YandexRootCA.pem'
+CERT = '/etc/ssl/certs/ca-certificates.crt'
 CH_ISSUES_TABLE = os.environ['CH_ISSUES_TABLE']
 CH_CHANGELOG_TABLE = os.environ['CH_CHANGELOG_TABLE']
 
