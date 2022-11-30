@@ -25,8 +25,8 @@ AUTH = {
     'X-ClickHouse-User': os.environ['CH_USER'],
     'X-ClickHouse-Key': CH_PASSWORD,
 }
-#CERT = './YandexRootCA.pem'
-CERT = '/etc/ssl/certs/ca-certificates.crt'
+CERT = './YandexRootCA.pem'
+#CERT = '/etc/ssl/certs/ca-certificates.crt'
 CH_ISSUES_TABLE = os.environ['CH_ISSUES_TABLE']
 CH_CHANGELOG_TABLE = os.environ['CH_CHANGELOG_TABLE']
 
@@ -59,7 +59,7 @@ issues_columns = ['organization_id',
             'parent_key',
             'parent_display',
             'components_display',
-            'sprint',
+            'sprint_display',
             'epic_display',
             'previousStatusLastAssignee_display',
             'originalEstimation',
@@ -237,6 +237,16 @@ def shape_issues_data(json_data):
                 if i < len(item)-1:
                     s += ', '
             return s
+    #function to transform sprint column from list of dictionaries 
+    #to simple comma separated string
+    def format_sprint_column(item):
+        if (type(item)==list):
+            s=''
+            for i in range(len(item)):
+                s += item[i]['display']
+                if i < len(item)-1:
+                    s += ', '
+            return s
 
     try:
         raw_df['boards_names'] = raw_df['boards'].apply(format_boards_column)
@@ -244,6 +254,10 @@ def shape_issues_data(json_data):
         pass
     try:
         raw_df['components_display'] = raw_df['components'].apply(format_components_column)
+    except KeyError:
+        pass
+    try:
+        raw_df['sprint_display'] = raw_df['sprint'].apply(format_sprint_column)
     except KeyError:
         pass
 
@@ -400,7 +414,7 @@ def init_database(drop_table=False):
             parent_key                          String,
             parent_display                      String,
             components_display                  String,
-            sprint                              String,
+            sprint_display                      String,
             epic_display                        String,
             previousStatusLastAssignee_display  String,
             originalEstimation                  String,
@@ -466,7 +480,7 @@ def init_database(drop_table=False):
         updatedBy_display, type_display, priority_display, 
         createdBy_display, assignee_display, queue_key, queue_display, 
         status_display, previousStatus_display, parent_key, parent_display, 
-        components_display, sprint, epic_display, 
+        components_display, sprint_display, epic_display, 
         previousStatusLastAssignee_display, originalEstimation, spent, 
         tags, estimation, checklistDone, checklistTotal, emailCreatedBy,
         sla, emailTo, emailFrom, lastCommentUpdatedAt, followers, 
@@ -482,7 +496,7 @@ def init_database(drop_table=False):
             updatedBy_display, type_display, priority_display, 
             createdBy_display, assignee_display, queue_key, queue_display, 
             status_display, previousStatus_display, parent_key, parent_display, 
-            components_display, sprint, epic_display, 
+            components_display, sprint_display, epic_display, 
             previousStatusLastAssignee_display, originalEstimation, spent, 
             tags, estimation, checklistDone, checklistTotal, emailCreatedBy,
             sla, emailTo, emailFrom, lastCommentUpdatedAt, followers, 
