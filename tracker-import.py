@@ -26,8 +26,8 @@ AUTH = {
     'X-ClickHouse-User': os.environ['CH_USER'],
     'X-ClickHouse-Key': CH_PASSWORD,
 }
-CERT = './YandexRootCA.pem'
-#CERT = '/etc/ssl/certs/ca-certificates.crt'
+#CERT = './YandexRootCA.pem'
+CERT = '/etc/ssl/certs/ca-certificates.crt'
 CH_ISSUES_TABLE = os.environ['CH_ISSUES_TABLE']
 CH_CHANGELOG_TABLE = os.environ['CH_CHANGELOG_TABLE']
 
@@ -283,7 +283,7 @@ def shape_issues_data(json_data):
         raw_df['estimation'] = raw_df['estimation'].apply(calculate_iso8601_duration)
     except KeyError:
         pass
-    
+
     #filter out unnecessary colums
     shaped_df = pd.DataFrame(columns=issues_columns)
     for col in issues_columns:
