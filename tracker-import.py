@@ -275,7 +275,7 @@ def shape_issues_data(json_data):
         raw_df['originalEstimation'] = raw_df['originalEstimation'].apply(calculate_iso8601_duration)
     except KeyError:
         pass
-    
+
     #filter out unnecessary colums
     shaped_df = pd.DataFrame(columns=issues_columns)
     for col in issues_columns:
@@ -432,7 +432,7 @@ def init_database(drop_table=False):
             sprint_display                      String,
             epic_display                        String,
             previousStatusLastAssignee_display  String,
-            originalEstimation                  String,
+            originalEstimation                  Decimal(15,2),
             spent                               String,
             tags                                String,
             estimation                          String,
