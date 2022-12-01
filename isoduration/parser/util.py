@@ -27,10 +27,6 @@ def is_letter(ch: str) -> bool:
 
 
 def parse_designator(designators: Dict[str, str], target: str) -> str:
-    date_designators = {'Y': 'years', 'M': 'months', 'D': 'days', 'W': 'weeks'}
-    value = date_designators.get(target)
-    return value
-    '''
     while True:
         try:
             key, value = designators.popitem(last=False)  # type: ignore
@@ -39,7 +35,6 @@ def parse_designator(designators: Dict[str, str], target: str) -> str:
 
         if key == target:
             return value
-    '''
 
 def is_integer(number: decimal.Decimal) -> bool:
     return number == number.to_integral_value()
