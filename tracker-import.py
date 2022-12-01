@@ -3,6 +3,7 @@ import requests
 import os
 import pandas as pd
 from datetime import datetime, timedelta
+from isoduration import parse_duration
 
 TRACKER_API_URL_BASE_FOR_ISSUE_LIST = 'https://api.tracker.yandex.net/v2/issues/_search'
 TRACKER_API_URL_PARAMS_FOR_ISSUE_LIST = '?scrollType=unsorted&perScroll=100&scrollTTLMillis=10000'
@@ -247,6 +248,16 @@ def shape_issues_data(json_data):
                 if i < len(item)-1:
                     s += ', '
             return s
+    
+    def calculate_iso8601_duration(item):
+        try:
+            duration_obj = parse_duration(item)
+            duration =  duration_obj.date.years * 60*8*20*12 + duration_obj.date.months * 60*8*20
+            duration += duration_obj.date.days  * 60*8       + duration_obj.date.weeks  * 60*40
+            duration += duration_obj.time.hours * 60         + duration_obj.time.minutes
+        except TypeError:
+            duration = 0
+        return duration
 
     try:
         raw_df['boards_names'] = raw_df['boards'].apply(format_boards_column)
@@ -261,6 +272,7 @@ def shape_issues_data(json_data):
     except KeyError:
         pass
 
+    raw_df['originalEstimation'] = raw_df['originalEstimation'].apply(calculate_iso8601_duration)
     #filter out unnecessary colums
     shaped_df = pd.DataFrame(columns=issues_columns)
     for col in issues_columns:

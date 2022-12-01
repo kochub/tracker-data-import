@@ -1,6 +1,8 @@
 myenv
+examples/
 environment.sh
 YandexRootCA.pem
 .DS_Store
 build/
 .vscode
+**/__pycache__/
