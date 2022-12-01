@@ -275,7 +275,15 @@ def shape_issues_data(json_data):
         raw_df['originalEstimation'] = raw_df['originalEstimation'].apply(calculate_iso8601_duration)
     except KeyError:
         pass
-
+    try:
+        raw_df['spent'] = raw_df['spent'].apply(calculate_iso8601_duration)
+    except KeyError:
+        pass
+    try:
+        raw_df['estimation'] = raw_df['estimation'].apply(calculate_iso8601_duration)
+    except KeyError:
+        pass
+    
     #filter out unnecessary colums
     shaped_df = pd.DataFrame(columns=issues_columns)
     for col in issues_columns:
@@ -433,9 +441,9 @@ def init_database(drop_table=False):
             epic_display                        String,
             previousStatusLastAssignee_display  String,
             originalEstimation                  Decimal(15,2),
-            spent                               String,
+            spent                               Decimal(15,2),
             tags                                String,
-            estimation                          String,
+            estimation                          Decimal(15,2),
             checklistDone                       Decimal(15,2),
             checklistTotal                      Decimal(15,2),
             emailCreatedBy                      String,
