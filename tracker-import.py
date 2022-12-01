@@ -271,8 +271,11 @@ def shape_issues_data(json_data):
         raw_df['sprint_display'] = raw_df['sprint'].apply(format_sprint_column)
     except KeyError:
         pass
-
-    raw_df['originalEstimation'] = raw_df['originalEstimation'].apply(calculate_iso8601_duration)
+    try:
+        raw_df['originalEstimation'] = raw_df['originalEstimation'].apply(calculate_iso8601_duration)
+    except KeyError:
+        pass
+    
     #filter out unnecessary colums
     shaped_df = pd.DataFrame(columns=issues_columns)
     for col in issues_columns:
