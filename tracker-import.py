@@ -591,7 +591,7 @@ def run_clickhouse_query(query, connection_timeout=1500):
         host=os.environ['CH_HOST'],
         db=os.environ['CH_DB'])
     #Run Clickhouse query, places in the body of POST request (Query string could be long and not fit in url string)
-    response = requests.post(url, data=query, headers=AUTH, verify=CERT, timeout=connection_timeout)
+    response = requests.post(url, data=query.encode('utf-8'), headers=AUTH, verify=CERT, timeout=connection_timeout)
     if response.status_code == 200:
         return response.text
     else:
