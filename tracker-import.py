@@ -2,6 +2,7 @@ from typing import List
 import requests
 import os
 import pandas as pd
+import warnings
 from datetime import datetime, timedelta
 from isoduration import parse_duration
 
@@ -339,7 +340,6 @@ def shape_issue_changelog_data(json_data):
     raw_df.insert(0, 'organization_id', os.environ['TRACKER_ORG_ID'])
     #expand list in the 'fields' field to duplicate rows
     raw_df = raw_df.explode('fields')
-    t=1
 
     #get (fields -> field -> display) data
     def get_field_display(item):
@@ -546,6 +546,38 @@ def init_database(drop_table=False):
     '''
     run_clickhouse_query(create_changelog_view)
 
+    create_open_issues_view = '''
+        CREATE OR REPLACE VIEW open_issues AS
+        SELECT c.issue_key,
+        i.createdAt,
+        c.updatedAt,
+        c2.updatedAt,
+        if (
+            c.from_display = 'Открыт'
+            and year(c2.updatedAt) = 1970,
+            0,
+            (
+            toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c2.updatedAt)
+            ) / 60
+        ) as fromPrevious,
+        c.from_display,
+        c.to_display,
+        (
+            toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c.createdAt)
+        ) / 60 as fromCreated
+        from v_tracker_changelog c
+        join v_tracker_issues i on c.issue_key = i.key asof
+        left join db1.v_tracker_changelog c2 on c.issue_key = c2.issue_key
+        and c.type = c2.type
+        and c.field_display = c2.field_display
+        and c.updatedAt > c2.updatedAt
+        where c.type = 'IssueWorkflow'
+        and c.field_display = 'Статус'
+        order by c.issue_key,
+        c.updatedAt
+    '''
+    run_clickhouse_query(create_open_issues_view)
+
 def run_clickhouse_query(query, connection_timeout=1500):
     """
     Exec clickhouse query
@@ -620,4 +652,4 @@ def handler(event, context):
     upload_data_to_db(tracker_issues_df_data, tracker_issues_changelog_df_data)
 
 if __name__ == "__main__":
-    handler(None, None);
+    handler(None, None)
