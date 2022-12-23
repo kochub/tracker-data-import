@@ -2,12 +2,12 @@ from typing import List
 import requests
 import os
 import pandas as pd
-import warnings
+import datetime
 from datetime import datetime, timedelta
 from isoduration import parse_duration
 
 TRACKER_API_URL_BASE_FOR_ISSUE_LIST = 'https://api.tracker.yandex.net/v2/issues/_search'
-TRACKER_API_URL_PARAMS_FOR_ISSUE_LIST = '?scrollType=unsorted&perScroll=100&scrollTTLMillis=10000'
+TRACKER_API_URL_PARAMS_FOR_ISSUE_LIST = '?scrollType=unsorted&perScroll=100&scrollTTLMillis=60000'
 TRACKER_API_URL_BASE_FOR_ISSUE_CHANGELOG = 'https://api.tracker.yandex.net/v2/issues/'
 TRACKER_API_URL_PARAMS_FOR_ISSUE_CHANGELOG = '/changelog?perPage=50&type=IssueWorkflow'
 
@@ -547,34 +547,35 @@ def init_database(drop_table=False):
     run_clickhouse_query(create_changelog_view)
 
     create_open_issues_view = '''
-        CREATE OR REPLACE VIEW open_issues AS
-        SELECT c.issue_key,
-        i.createdAt,
-        c.updatedAt,
-        c2.updatedAt,
-        if (
-            c.from_display = 'Открыт'
-            and year(c2.updatedAt) = 1970,
-            0,
+        create or replace view db1.v_tracker_statuses as (
+            select c.issue_key as issue_key,
+            i.createdAt as issueCreated,
+            c.updatedAt as toStatusTimestamp,
+            c2.updatedAt as fromStatusTimestamp,
+            if (
+                c.from_display = 'Открыт'
+                and year(c2.updatedAt) = 1970,
+                0,
+                (
+                toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c2.updatedAt)
+                ) / 60
+            ) as fromPrevious,
+            c.from_display as fromStatus,
+            c.to_display as toStatus,
             (
-            toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c2.updatedAt)
-            ) / 60
-        ) as fromPrevious,
-        c.from_display,
-        c.to_display,
-        (
-            toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c.createdAt)
-        ) / 60 as fromCreated
-        from v_tracker_changelog c
-        join v_tracker_issues i on c.issue_key = i.key asof
-        left join db1.v_tracker_changelog c2 on c.issue_key = c2.issue_key
-        and c.type = c2.type
-        and c.field_display = c2.field_display
-        and c.updatedAt > c2.updatedAt
-        where c.type = 'IssueWorkflow'
-        and c.field_display = 'Статус'
-        order by c.issue_key,
-        c.updatedAt
+                toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c.createdAt)
+            ) / 60 as fromCreated
+            from db1.v_tracker_changelog c
+            join db1.v_tracker_issues i on c.issue_key = i.key asof
+            left join db1.v_tracker_changelog c2 on c.issue_key = c2.issue_key
+            and c.type = c2.type
+            and c.field_display = c2.field_display
+            and c.updatedAt > c2.updatedAt
+            where c.type = 'IssueWorkflow'
+            and c.field_display = 'Статус'
+            order by c.issue_key,
+            c.updatedAt
+        ) settings join_use_nulls = 1
     '''
     run_clickhouse_query(create_open_issues_view)
 
@@ -645,7 +646,9 @@ def upload_data_to_db(issues_df, changelog_df):
 def handler(event, context):
     init_database(drop_table=False)
     tracker_query_text = get_issues_query_text()
+    print(datetime.now(), "Starting loading issues")
     tracker_isses_json_data = get_tracker_issue_list(TRACKER_API_URL_BASE_FOR_ISSUE_LIST, query_text=tracker_query_text)
+    print(datetime.now(), "Finished loading issues")
     tracker_isses_changelog_json_data = get_tracker_issues_changelog(tracker_isses_json_data)
     tracker_issues_df_data = shape_issues_data(tracker_isses_json_data)
     tracker_issues_changelog_df_data = shape_issue_changelog_data(tracker_isses_changelog_json_data)
