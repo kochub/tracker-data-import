@@ -407,7 +407,7 @@ def init_database(drop_table=False):
         run_clickhouse_query(drop_issues_table_query)
 
     create_issues_table_query = '''
-        CREATE TABLE IF NOT EXISTS ''' + CH_ISSUES_TABLE + '''
+        CREATE TABLE IF NOT EXISTS {db}.''' + CH_ISSUES_TABLE + '''
         (
             organization_id                     String,
             self                                String,
@@ -468,6 +468,7 @@ def init_database(drop_table=False):
         ENGINE = ReplacingMergeTree()  
         ORDER BY (id) 
         '''
+    create_issues_table_query = create_issues_table_query.format(db=os.environ['CH_DB'])  
     run_clickhouse_query(create_issues_table_query)
 
     #issues changelog data
@@ -476,7 +477,7 @@ def init_database(drop_table=False):
         run_clickhouse_query(drop_changelog_table_query)
 
     create_changelog_table_query = '''
-        CREATE TABLE IF NOT EXISTS ''' + CH_CHANGELOG_TABLE + '''
+        CREATE TABLE IF NOT EXISTS {db}.''' + CH_CHANGELOG_TABLE + '''
         (
             organization_id                     String,
             id                                  String,
@@ -492,10 +493,11 @@ def init_database(drop_table=False):
         ENGINE = ReplacingMergeTree()  
         ORDER BY (id, field_display) 
         '''
+    create_changelog_table_query = create_changelog_table_query.format(db=os.environ['CH_DB'])    
     run_clickhouse_query(create_changelog_table_query)
     
     create_issues_view = '''
-        CREATE OR REPLACE VIEW v_tracker_issues AS
+        CREATE OR REPLACE VIEW {db}.v_tracker_issues AS
         SELECT organization_id, `self`, id, `key`, version, storyPoints, 
         summary, statusStartTime, boards_names, createdAt, 
         commentWithoutExternalMessageCount, votes, 
@@ -528,9 +530,10 @@ def init_database(drop_table=False):
             resolvedAt, resolvedBy_display, resolution_display, 
             lastQueue_display,
             row_number() over (partition by id order by updatedAt desc) as lvl
-            FROM db1.''' + CH_ISSUES_TABLE + '''
+            FROM {db}.''' + CH_ISSUES_TABLE + '''
         ) T WHERE T.lvl = 1;
     '''
+    create_issues_view = create_issues_view.format(db=os.environ['CH_DB'])
     run_clickhouse_query(create_issues_view)
 
     create_changelog_view = '''
@@ -541,13 +544,14 @@ def init_database(drop_table=False):
             SELECT organization_id, id, issue_key, updatedAt, updatedBy_display, `type`,
             field_display, from_display, to_display, worklog,
             row_number() over (partition by organization_id, id, field_display order by updatedAt desc) as lvl
-            FROM db1.''' + CH_CHANGELOG_TABLE + '''
+            FROM {db}.''' + CH_CHANGELOG_TABLE + '''
         ) T WHERE T.lvl = 1;
     '''
+    create_changelog_view = create_changelog_view.format(db=os.environ['CH_DB'])
     run_clickhouse_query(create_changelog_view)
 
     create_open_issues_view = '''
-        create or replace view db1.v_tracker_statuses as (
+        create or replace view {db}.v_tracker_statuses as (
             select c.issue_key as issue_key,
             i.createdAt as issueCreated,
             c.updatedAt as toStatusTimestamp,
@@ -565,9 +569,9 @@ def init_database(drop_table=False):
             (
                 toUnixTimestamp(c.updatedAt) - toUnixTimestamp(c.createdAt)
             ) / 60 as fromCreated
-            from db1.v_tracker_changelog c
-            join db1.v_tracker_issues i on c.issue_key = i.key asof
-            left join db1.v_tracker_changelog c2 on c.issue_key = c2.issue_key
+            from {db}.v_tracker_changelog c
+            join {db}.v_tracker_issues i on c.issue_key = i.key asof
+            left join {db}.v_tracker_changelog c2 on c.issue_key = c2.issue_key
             and c.type = c2.type
             and c.field_display = c2.field_display
             and c.updatedAt > c2.updatedAt
@@ -577,6 +581,7 @@ def init_database(drop_table=False):
             c.updatedAt
         ) settings join_use_nulls = 1
     '''
+    create_open_issues_view = create_open_issues_view.format(db=os.environ['CH_DB'])    
     run_clickhouse_query(create_open_issues_view)
 
 def run_clickhouse_query(query, connection_timeout=1500):
